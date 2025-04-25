@@ -13,9 +13,11 @@ import (
 )
 
 type Result struct {
-	Host      string   `json:"host"`
-	Reachable bool     `json:"reachable"`
-	OpenPorts []string `json:"open_ports,omitempty"`
+	Host          string   `json:"host"`
+	IPAddress     string   `json:"ip_address,omitempty"`
+	AvgResponseMs float64  `json:"avg_response_ms,omitempty"`
+	Reachable     bool     `json:"reachable"`
+	OpenPorts     []string `json:"open_ports,omitempty"`
 }
 
 const (
@@ -23,6 +25,7 @@ const (
 	resultFile    = "subdomain-results.json"
 	maxWorkers    = 50
 	timeout       = 2 * time.Second
+	pingCount     = 3
 )
 
 var totalScanned uint32
@@ -73,7 +76,7 @@ func main() {
 	if len(allResults) > 0 {
 		fmt.Println("\n\033[1;36mReachable Subdomains:\033[0m")
 		for _, res := range allResults {
-			fmt.Printf("  \033[1;32m%-30s\033[0m", res.Host)
+			fmt.Printf("  \033[1;32m%-30s\033[0m [IP: %s | Avg: %.2fms]", res.Host, res.IPAddress, res.AvgResponseMs)
 			if len(res.OpenPorts) > 0 {
 				var portDisplay []string
 				for _, p := range res.OpenPorts {
@@ -92,13 +95,31 @@ func worker(domain string, ports []string, jobs <-chan string, results chan<- Re
 	defer wg.Done()
 	for sub := range jobs {
 		fullHost := fmt.Sprintf("%s.%s", sub, domain)
-		ipAddrs, err := net.LookupHost(fullHost)
+		ipAddrs, err := net.LookupIP(fullHost)
 		if err != nil || len(ipAddrs) == 0 {
 			updateProgress(total)
 			continue
 		}
 
-		result := Result{Host: fullHost, Reachable: true}
+		var ipv4Addr string
+		for _, ip := range ipAddrs {
+			if ip.To4() != nil {
+				ipv4Addr = ip.String()
+				break
+			}
+		}
+		if ipv4Addr == "" {
+			updateProgress(total)
+			continue
+		}
+
+		avgTime := measureLatency(ipv4Addr)
+		result := Result{
+			Host:          fullHost,
+			Reachable:     true,
+			IPAddress:     ipv4Addr,
+			AvgResponseMs: avgTime,
+		}
 
 		if len(ports) > 0 {
 			for _, port := range ports {
@@ -111,6 +132,25 @@ func worker(domain string, ports []string, jobs <-chan string, results chan<- Re
 		results <- result
 		updateProgress(total)
 	}
+}
+
+func measureLatency(ip string) float64 {
+	var total time.Duration
+	success := 0
+
+	for i := 0; i < pingCount; i++ {
+		start := time.Now()
+		conn, err := net.DialTimeout("tcp", net.JoinHostPort(ip, "80"), timeout)
+		if err == nil {
+			total += time.Since(start)
+			conn.Close()
+			success++
+		}
+	}
+	if success == 0 {
+		return 0
+	}
+	return float64(total.Milliseconds()) / float64(success)
 }
 
 func updateProgress(total int) {
@@ -160,8 +200,19 @@ func readSubdomains(filename string) ([]string, error) {
 	return subs, scanner.Err()
 }
 
-func saveResults(results []Result) {
-	data, err := json.MarshalIndent(results, "", "  ")
+func saveResults(newResults []Result) {
+	var existingResults []Result
+
+	// Try to load existing results
+	if data, err := os.ReadFile(resultFile); err == nil {
+		_ = json.Unmarshal(data, &existingResults)
+	}
+
+	// Append new results
+	existingResults = append(existingResults, newResults...)
+
+	// Save combined results
+	data, err := json.MarshalIndent(existingResults, "", "  ")
 	if err != nil {
 		fmt.Printf("\033[1;31mFailed to write results: %v\033[0m\n", err)
 		return
