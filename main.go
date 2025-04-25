@@ -22,10 +22,10 @@ type Result struct {
 
 const (
 	subdomainFile = "subdomains.dat"
-	resultFile    = "subdomain-results.json"
-	maxWorkers    = 50
+	resultFile    = "SDresults.json"
+	maxWorkers    = 200
 	timeout       = 2 * time.Second
-	pingCount     = 3
+	pingCount     = 2
 )
 
 var totalScanned uint32
