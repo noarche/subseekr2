@@ -9,7 +9,15 @@
 
 
 
+### Manual Install
 
+`git clone https://github.com/noarche/subseekr2`
+
+`cd subseekr2`
+
+`go build -o subseekr main.go`
+
+`./subseekr`
 
 
 For more information see the original [read me](https://github.com/noarche/subseekr)
