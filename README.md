@@ -1,6 +1,6 @@
 ### Quick install
 
-`go install github.com/noarche/subseekr2@latest`
+`go get github.com/noarche/subseekr2@v1.0.1`
 
 
 
